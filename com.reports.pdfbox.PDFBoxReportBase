@@ -1,0 +1,353 @@
+package com.reports.pdfbox;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.text.SimpleDateFormat;
+import java.util.Iterator;
+
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageTree;
+import org.apache.pdfbox.pdmodel.font.PDFont;
+import org.apache.pdfbox.pdmodel.font.PDType0Font;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+
+import be.quodlibet.boxable.BaseTable;
+import be.quodlibet.boxable.Cell;
+import be.quodlibet.boxable.HorizontalAlignment;
+import be.quodlibet.boxable.Row;
+import be.quodlibet.boxable.VerticalAlignment;
+import be.quodlibet.boxable.image.Image;
+import be.quodlibet.boxable.utils.ImageUtils;
+
+public abstract class PDFBoxReportBase {
+	
+	public static final String CLASSNAME = "PDFBoxReportBase";
+	public static final String TRACETAG = "com.s1.pso.reports.pdfbox";
+	public static final SimpleDateFormat PRINTTIMEFORMAT = new SimpleDateFormat("dd-MMM-yyyy HH:mm:ss");
+	public static String path;
+	
+	static {
+		try {
+			//BASEFONT = PDType0Font.load(new PDDocument(), new FileInputStream(new File(fontPath)), true);
+		} catch (Exception e) {
+			
+		}
+		
+	}
+	protected float yStartNewPage;//Y position where possible new page of Table will start
+	protected float yStart; //Y position where Table will start, need to adjust this position accordingly every time when create new table
+	protected float tableBottomMargin = 70f;//table bottom margin to page end
+	protected float tableMargin = 20f;//table left/right margin
+	protected float pageMargin;
+	protected float tableWidth;
+	protected float pageHeight;
+	protected float rowHeight = 10f;
+	protected float yPositionInDoc = 0f;//position in current page, every time draw a need table need to update this value to get the latest position
+	protected int currentPageIndex = 1;
+	
+	protected PDDocument pdfDoc;
+	protected PDPage currentPage;//every time when add new table need to update this currentPage by calling BaseTable.getCurrentPage()
+	protected Row<PDPage> reportHeader;//for the table that cross pages, the table need to add this headerRow to its header list table.addHeaderRow(header);
+	protected PDFont normalFont;
+	protected PDFont boldFont;
+	
+	
+	public PDFBoxReportBase () {
+		try {
+			pdfDoc = new PDDocument();
+			currentPage = new PDPage();
+			pdfDoc.addPage(currentPage);
+			pageHeight = currentPage.getMediaBox().getHeight();
+			tableWidth = currentPage.getMediaBox().getWidth() - 40f;
+			yStartNewPage = pageHeight - tableMargin;
+			yStart = yStartNewPage;
+			pageMargin += tableMargin + tableBottomMargin;
+			loadFont();
+		}catch(Exception e) {
+			
+		}
+	}
+	
+	protected void loadFont() throws Exception {
+		try {
+			normalFont = PDType0Font.load(pdfDoc, new FileInputStream(new File(path+"/simhei.TTF")), true);
+			boldFont = normalFont;
+		}catch(Exception e) {
+			
+			normalFont = PDType1Font.HELVETICA;
+			boldFont = PDType1Font.HELVETICA_BOLD;
+		}
+	}
+	
+	/**
+	 * 
+	 * @param dataHolder
+	 */
+	public abstract void generateReport(ReportDataHolder dataHolder);
+	
+	/**
+	 * here only provide simple report header, only consist of logo and Title 
+	 * and will only be added to first page
+	 * @param reportTitle
+	 * @throws Exception
+	 */
+	protected void createReportHeader(String reportTitle) {
+		try {
+			BaseTable headerTable = createTable(0f);
+			reportHeader = headerTable.createRow(20f);
+			// logo
+			File logoFile = new File(path+"//Logo.jpg");
+			Image logo = ImageUtils.readImage(logoFile);
+			Cell<PDPage> logoCell = reportHeader.createImageCell(50f, logo, HorizontalAlignment.LEFT, VerticalAlignment.MIDDLE);
+			logoCell.setBorderStyle(null);
+			//Report title
+			Cell<PDPage> title = addBorderlessCell(reportHeader, 50f, reportTitle, boldFont);
+			title.setAlign(HorizontalAlignment.RIGHT);
+			title.setValign(VerticalAlignment.BOTTOM);
+			title.setFontSize(15f);
+			addTable(headerTable);
+		} catch (Exception e) {
+
+		}
+	}
+	/**
+	 * It's unlike iText, here need to iterate all the page 
+	 * and add the footer table to end of every page
+	 * @throws IOException
+	 */
+	protected void createReportFooter() {
+		try {
+			PDPageTree pages = pdfDoc.getPages();
+			Iterator<PDPage> pageIterator = pages.iterator();
+			int totalPageNo = pdfDoc.getNumberOfPages();
+			int pageIndex = 0;
+			while(pageIterator.hasNext()) {
+				PDPage page = pageIterator.next();
+				pageIndex++;
+				BaseTable footerTable = new BaseTable(tableBottomMargin - 10f, yStartNewPage, 0f, tableWidth, tableMargin, pdfDoc, page, true,true);
+				Row<PDPage> printByRow = footerTable.createRow(10f);
+				//printby label
+				addCell(printByRow, 12f, "PRINTED BY", boldFont, true, true, false, false);
+				//printedby comma
+				addCell(printByRow, 2f, ":", false, true, false, false);
+				//printby user
+				addCell(printByRow, 66f, "Who", false, true, false, false);
+				//Page of
+				Cell<PDPage> pageOf = addCell(printByRow, 20f, "PAGE" + " " + pageIndex + " / " + totalPageNo, boldFont, false, true, true, false);
+				pageOf.setAlign(HorizontalAlignment.RIGHT);
+				//Print on
+				Row<PDPage> printORow = footerTable.createRow(10f);
+				addCell(printORow, 12f, "PRINTED ON", boldFont, true, false, false, true);
+				//Print on comma
+				addCell(printORow, 2f, ":", false, false, false, true);
+				//Print time
+				String printTime = PRINTTIMEFORMAT.format(new java.util.Date());
+				addColspanCell(printORow, 86f, printTime, false, false, true, true);
+				
+				footerTable.draw();
+			}
+		}catch(Exception e) {
+			
+		}
+	}
+	
+	/**
+	 * 
+	 * @param row
+	 * @param width
+	 * @param value
+	 * @param font
+	 * @param leftBorder
+	 * @param topBorder
+	 * @param rightBorder
+	 * @param bottomBorder
+	 * @return
+	 */
+	protected Cell<PDPage> addCell(Row<PDPage> row, float width, String value, PDFont font, 
+											boolean leftBorder, boolean topBorder, boolean rightBorder, boolean bottomBorder) {
+		Cell<PDPage> cell = row.createCell(width, value != null ? value.replaceAll("\n", "<br>").replaceAll("\r", "<br>") : "");
+		//if(font != null) cell.setFont(BASEFONT);
+		cell.setFont(font);
+		if(!leftBorder)  cell.setLeftBorderStyle(null);
+		if(!topBorder)  cell.setTopBorderStyle(null);
+		if(!rightBorder)  cell.setRightBorderStyle(null);
+		if(!bottomBorder)  cell.setBottomBorderStyle(null);
+		return cell;
+	}
+	
+	/**
+	 * 
+	 * @param row
+	 * @param width
+	 * @param value
+	 * @param leftBorder
+	 * @param topBorder
+	 * @param rightBorder
+	 * @param bottomBorder
+	 * @return
+	 */
+	protected Cell<PDPage> addCell(Row<PDPage> row, float width, String value,
+											boolean leftBorder, boolean topBorder, boolean rightBorder, boolean bottomBorder) {
+		Cell<PDPage> cell = addCell(row, width, value,  normalFont, leftBorder, topBorder, rightBorder, bottomBorder);
+		return cell;
+	}
+	
+	/**
+	 * 
+	 * @param row
+	 * @param width
+	 * @param value
+	 * @param font
+	 * @param leftBorder
+	 * @param topBorder
+	 * @param rightBorder
+	 * @param bottomBorder
+	 * @return
+	 */
+	protected Cell<PDPage> addColspanCell(Row<PDPage> row, float width, String value,
+												boolean leftBorder, boolean topBorder, boolean rightBorder, boolean bottomBorder) {
+		Cell<PDPage> cell = addCell(row, width, value, normalFont, leftBorder, topBorder, rightBorder, bottomBorder);
+		cell.setColspanCell(true);
+		return cell;
+	}
+	
+	/**
+	 * 
+	 * @param row
+	 * @param width
+	 * @param value
+	 * @param leftBorder
+	 * @param topBorder
+	 * @param rightBorder
+	 * @param bottomBorder
+	 * @param hAlign
+	 * @param vAlign
+	 * @return
+	 */
+	protected Cell<PDPage> addCell(Row<PDPage> row, float width, String value, PDFont font,
+											boolean leftBorder, boolean topBorder, boolean rightBorder, boolean bottomBorder,
+														HorizontalAlignment hAlign,VerticalAlignment vAlign) {
+		Cell<PDPage> cell = addCell(row, width, value, font, leftBorder, topBorder, rightBorder, bottomBorder);
+		cell.setAlign(hAlign);
+		cell.setValign(vAlign);
+		return cell;
+	}
+	
+	protected Cell<PDPage> addBorderlessCell(Row<PDPage> row, float width, String value, PDFont font) {
+		Cell<PDPage> cell = row.createCell(width, value != null ? value.replaceAll("\n", "<br>").replaceAll("\r", "<br>") : "");
+		//if(font != null) cell.setFont(BASEFONT);
+		cell.setFont(font);
+		cell.setBorderStyle(null);
+		return cell;
+	}
+	
+	protected Cell<PDPage> addBorderlessCell(Row<PDPage> row, float width, String value) {
+		return addBorderlessCell(row, width, value, normalFont);
+	}
+	
+	/**
+	 * 
+	 * @param yStartPosition where the table start(current page based).
+	 * @return
+	 * @throws IOException
+	 */
+	protected BaseTable createBaseTable(float yStartPosition) throws IOException {
+		return new BaseTable(yStart - yStartPosition, yStartNewPage, tableBottomMargin, tableWidth, tableMargin, pdfDoc, currentPage, true,true);
+	}
+	
+	/**
+	 * Default to where previous table + 10f
+	 * @return
+	 * @throws IOException
+	 */
+	protected BaseTable createTable() throws IOException {
+		return createTable(10f);
+	}
+	
+	/**
+	 * yOffset where previous table + yOffset
+	 * @return
+	 * @throws IOException
+	 */
+	protected BaseTable createTable(float yOffset) throws IOException {
+		BaseTable table = createBaseTable((yPositionInDoc % pageHeight) + yOffset);
+		yPositionInDoc += yOffset;
+		return table;
+	}
+	
+	/**
+	 * 
+	 * @param table
+	 * @throws IOException 
+	 */
+	protected void addTable(BaseTable table) throws IOException {
+		addTable(table, true);
+	}
+	
+	/**
+	 * 
+	 * @param table
+	 * @param updateDoc
+	 * @throws IOException
+	 */
+	private void addTable(BaseTable table, boolean updateDoc) throws IOException {
+		table.draw();
+		if(updateDoc) updateDocInfo(table);
+	}
+	
+	/**
+	 * 
+	 * @param table
+	 */
+	private void updateDocInfo(BaseTable table) {
+		currentPage = table.getCurrentPage();
+		yPositionInDoc += table.getHeaderAndDataHeight();
+		if(pdfDoc.getNumberOfPages() > currentPageIndex) {
+			float currentPageMargin = pageMargin;
+			float heightWithoutReportHeader = 0f;
+			if(table.getHeaderRows().size() > 0) {
+				for(Row<PDPage> header : table.getHeaderRows()) {
+					if(header != reportHeader) {
+						heightWithoutReportHeader += header.getHeight();
+					}
+					currentPageMargin += header.getHeight();
+				}
+			}
+			yPositionInDoc += (pdfDoc.getNumberOfPages() - currentPageIndex - 1) * currentPageMargin + heightWithoutReportHeader;
+			currentPageIndex = pdfDoc.getNumberOfPages();
+		}
+	}
+	
+	/**
+	 * 
+	 * @param output
+	 * @throws IOException
+	 */
+	protected void finish(OutputStream output) throws IOException {
+		pdfDoc.save(output);
+		pdfDoc.close();
+	}
+	
+	/**
+	 * 
+	 * @param filePath
+	 * @throws IOException
+	 */
+	protected void finish(String filePath) throws IOException {
+		finish(new File(filePath));
+	}
+	
+	/**
+	 * 
+	 * @param file
+	 * @throws IOException
+	 */
+	protected void finish(File file) throws IOException {
+		pdfDoc.save(file);
+		pdfDoc.close();
+	}
+
+}
